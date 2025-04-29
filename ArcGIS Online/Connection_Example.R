@@ -1,4 +1,12 @@
 
+# 0. Background -----------------------------------------------------------
+
+# This script provides an example of how to load an item from CMAP's ArcGIS Online (AGOL) organization into a R session. While this process is the same for all item in AGOL, this example uses an item from the Data Catalog group.
+
+# In order to run, please install the arcgis and arcgisbinding packages and link them with your ArcGIS Pro instance: https://developers.arcgis.com/r-bridge/installation/
+
+
+
 # 1. Setup ----------------------------------------------------------------
 
 # Load in packages
