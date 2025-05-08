@@ -37,7 +37,7 @@ muni_fl <- get_layer(muni_fs, id = 0)
 # Read in data from layer
 cmap_muni_sf <- arc_select(muni_fl)
 
-# Can also read in data directly from feature layer URL if you have that, which is the next level down in the ArcGIS REST API from the feature service URL if you view it in a separate tab
+# You can also read in data directly from feature layer URL if you have that, which is the next level down in the ArcGIS REST API from the feature service URL if you view it in a separate tab
 # cmap_muni_sf <- arc_select(arc_open("https://services5.arcgis.com/LcMXE3TFhi1BSaCY/arcgis/rest/services/Municipalities_Northeastern_Illinois_2024/FeatureServer/0"))
 
 # View as a table
