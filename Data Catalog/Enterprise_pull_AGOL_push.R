@@ -1,20 +1,27 @@
 library(tidyverse)
 library(janitor)
 library(tidycensus)
-library(blscrapeR)
 library(sf)
 library(arcgisbinding)
-library(mapview)
 arc.check_product()
+arc.check_portal()
 library(jsonlite)
 library(RSocrata)
 library(arcpy)
 library(purrr)
+library(xml2)
+library(arcgislayers)
+library(arcgis)
+library(httr)
 options(scipen = 9999999, digits = 6)
-arc.check_portal()
+# Get token for API call, make sure active portal is AGOL
 
 
-sign_up_sheet <- readxl::read_xlsx(here::here("Data Catalog", "Draft Data Catalog Sign-Up.xlsx"), sheet = "Enterprise Data Catalog") %>%
+agol_token <- auth_binding()
+set_arc_token(agol_token)
+
+
+sign_up_sheet <- readxl::read_xlsx("S:\\AdminGroups\\ResearchAnalysis\\MCS\\Draft Data Catalog Sign-Up.xlsx", sheet = "Enterprise Data Catalog") %>%
   filter(!is.na(ID),
          ID != "NA")
 
@@ -25,9 +32,11 @@ all_values <- trimws(unlist(split_values))
 #removing LUI For now due to size
 all_values <- all_values[all_values != '62faa3a93c124124a050c05d8ed858ea']
 
-
+#testing with one feature layer to make sure this works
+all_values <- all_values[all_values == '3c9ab81712b04e6d82715b03b85f5f82' | all_values == 'd483a88b929e46efbfa3d9088ec2cc30']
 
 gis <- import("arcgis.gis")$GIS
+arcgis <- import("arcgis.gis")
 features <- import("arcgis.features")
 content_manager <- import("arcgis.gis._impl._content_manager")
 portal <- gis("https://cmap-gisent01.cmap.local:7443/arcgis/", "mshapey_cmapgisENT", "CMAPPER2024!", verify_cert = FALSE)
@@ -36,61 +45,109 @@ items <- portal$content$search("", max_items=1000)
 
 items_filtered <- keep(items, ~ .x$id %in% all_values)
 
-# items_df <- tibble(
-#   title = map_chr(items, ~ .x$title),
-#   id = map_chr(items, ~ .x$id),
-#   type = map_chr(items, ~ .x$type)
-# ) %>%
-#   filter(type != "Service Definition")
+item_ids <- map_chr(items_filtered, "id")
 
-
-
-# Initialize a list to store downloaded/queried content
-item_contents <- list()
-
-# Loop through each item and try to get useful content
-for (i in seq_along(items_filtered)) {
-  item <- items_filtered[[i]]
-  title <- gsub("[^A-Za-z0-9_]", "_", item$title)  # Safe name
-  message(paste0("Processing item ", i, ": ", item$title, " (", item$type, ")"))
+full_items<- (map(item_ids, ~ portal$content$get(.x)))
+# full_dict <- full_items[[1]]$to_dict()
+agol_portal <- gis("https://www.arcgis.com/", 'mshapey_cmapgis', 'Stationtostation123!')
+user <- agol_portal$users$get("mshapey_cmapgis")
+library(zip)
+library(fs)
+uploaded_items <- map(full_items, function(item) {
+  title <- item[["title"]]
+  type <- item[["type"]]
+  description <- item[["description"]]
   
-  try({
-    if ("layers" %in% names(item)) {
-      # Feature layers or feature layer collections
-      for (j in seq_along(item$layers)) {
-        lyr <- item$layers[[j]]
-        df <- lyr$query(where = "1=1", out_fields = "*", as_df = TRUE)
-        layer_name <- paste0(title, "_layer", j)
-        item_contents[[layer_name]] <- df
-      }
-      
-    } else if ("tables" %in% names(item)) {
-      # Some feature services include tables
-      for (j in seq_along(item$tables)) {
-        tbl <- item$tables[[j]]
-        df <- tbl$query(where = "1=1", out_fields = "*", as_df = TRUE)
-        table_name <- paste0(title, "_table", j)
-        item_contents[[table_name]] <- df
-      }
-      
-    } else if (item$type == "CSV") {
-      # Try to download file-based content
-      path <- item$download()
-      df <- read.csv(path)
-      item_contents[[title]] <- df
-      
-    } else {
-      # For other item types, just store the item object
-      item_contents[[title]] <- item
+  snippet <- item[["snippet"]]
+  categories <- item[["categories"]]
+  url <- item[["url"]]
+  
+  if (is.null(title) || title == "" || is.null(type) || type == "") {
+    stop("Missing required title or type in item metadata.")
+  }
+  
+  # Check if the item type requires a URL or a file upload
+  if (!is.null(url) && !grepl("/Hosted/", url, ignore.case = TRUE)) {
+    # Upload via URL
+    url <- item[["url"]]
+    if (is.null(url) || url == "") {
+      stop(paste("Item of type", type, "requires a valid URL but none found"))
     }
     
-  }, silent = TRUE)
-}
-
-
-
-
-
-
+    uploaded_item <- agol_portal$content$add(
+      item_properties = list(
+        title = title,
+        type = type,
+        description = description,
+        
+        snippet = snippet,
+        categories = categories,
+        url = url
+      )
+    )
+  } else {
+    # Download to a temp dir
+    # Export to File Geodatabase
+    message("Exporting ", title, " to File Geodatabase...")
+    exported <- item$export(title, export_format = "File Geodatabase")
+    save_dir <- "C:\\Users\\mshapey\\Documents\\Test"
+    dir_create(save_dir)
+    
+    
+    # Download the exported .zip file
+    download_path <- exported$download(save_path =save_dir )
+    print(download_path)
+    #unzip 
+    unzip(download_path, exdir = "C:/Users/mshapey/Documents/Test/")
+    #get path of unzipped gdb
+    unzipped_contents <- list.dirs("C:/Users/mshapey/Documents/Test/", full.names = TRUE, recursive = FALSE)
+    
+    print(unzipped_contents)
+    
+    #rename gdb
+    new_path <- str_remove(download_path, '.zip')
+    
+    file.rename(unzipped_contents, paste0(new_path, ".gdb"))
+    
+    #zip gdb
+    gdb_folder <- paste0(new_path, '.gdb')
+    zip_file <- paste0(gdb_folder, '.zip')
+    gdb_files <- list.files(gdb_folder, recursive = TRUE, full.names = TRUE)
+    # zip(zipfile = zip_file, files = list.files(gdb_folder, full.names = TRUE))
+    # Windows shell command using powershell's Compress-Archive
+    system(sprintf(
+      'powershell -Command "Compress-Archive -Path \'%s\' -DestinationPath \'%s\'"',
+      gdb_folder,
+      zip_file
+    ))
+    
+    
+    
+    
+    # Upload as a new item
+    uploaded_item <- agol_portal$content$add(
+      path = zip_file,
+      item_properties = list(
+        title = title,
+        type = "File Geodatabase",
+        description = description,
+        
+        snippet = snippet,
+        categories = categories
+      ),
+      data = zip_file
+    )
+    # Publish it as a Hosted Feature Layer
+    published_item <- try(uploaded_item$publish(), silent = TRUE)
+    if (inherits(published_item, "try-error") || is.null(published_item)) {
+      message("Publishing failed for ", title)
+      return(uploaded_item)
+    }
+    
+    return(published_item)
+    
+    
+  }
+})
 
 
