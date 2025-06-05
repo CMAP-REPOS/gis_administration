@@ -13,6 +13,8 @@ library(xml2)
 library(arcgislayers)
 library(arcgis)
 library(httr)
+library(zip)
+library(fs)
 options(scipen = 9999999, digits = 6)
 # Get token for API call, make sure active portal is AGOL
 
@@ -33,7 +35,9 @@ all_values <- trimws(unlist(split_values))
 all_values <- all_values[all_values != '62faa3a93c124124a050c05d8ed858ea']
 
 #testing with one feature layer to make sure this works
-all_values <- all_values[all_values == '3c9ab81712b04e6d82715b03b85f5f82' | all_values == 'd483a88b929e46efbfa3d9088ec2cc30']
+all_values <- all_values[all_values == '706baca55c064d3889ca27edc8d70635' | all_values == '8aa1c80a0ea84112900b85c4f528f949' 
+                         | all_values == '912b2e8bf88f449ea9991a4243e613f1'| all_values == '0d92396d3f2446e3ab76db3deeee7b7a'
+                         | all_values == '359a7f12ed0b4bfaa19f372765d01a70']
 
 gis <- import("arcgis.gis")$GIS
 arcgis <- import("arcgis.gis")
@@ -49,15 +53,15 @@ item_ids <- map_chr(items_filtered, "id")
 
 full_items<- (map(item_ids, ~ portal$content$get(.x)))
 # full_dict <- full_items[[1]]$to_dict()
-agol_portal <- gis("https://www.arcgis.com/", 'mshapey_cmapgis', 'Stationtostation123!')
+agol_portal <- gis("https://www.arcgis.com/", 'mshapey_cmapgis', 'CMAPPER2024!')
 user <- agol_portal$users$get("mshapey_cmapgis")
-library(zip)
-library(fs)
+
+
+
 uploaded_items <- map(full_items, function(item) {
   title <- item[["title"]]
   type <- item[["type"]]
   description <- item[["description"]]
-  
   snippet <- item[["snippet"]]
   categories <- item[["categories"]]
   url <- item[["url"]]
@@ -67,6 +71,8 @@ uploaded_items <- map(full_items, function(item) {
   }
   
   # Check if the item type requires a URL or a file upload
+  #if item is NOT hosted, it can just republish using link
+  #else it has to download and re-upload the item
   if (!is.null(url) && !grepl("/Hosted/", url, ignore.case = TRUE)) {
     # Upload via URL
     url <- item[["url"]]
@@ -79,14 +85,12 @@ uploaded_items <- map(full_items, function(item) {
         title = title,
         type = type,
         description = description,
-        
         snippet = snippet,
         categories = categories,
         url = url
       )
     )
   } else {
-    # Download to a temp dir
     # Export to File Geodatabase
     message("Exporting ", title, " to File Geodatabase...")
     exported <- item$export(title, export_format = "File Geodatabase")
@@ -96,14 +100,12 @@ uploaded_items <- map(full_items, function(item) {
     
     # Download the exported .zip file
     download_path <- exported$download(save_path =save_dir )
-    print(download_path)
     #unzip 
     unzip(download_path, exdir = "C:/Users/mshapey/Documents/Test/")
     #get path of unzipped gdb
     unzipped_contents <- list.dirs("C:/Users/mshapey/Documents/Test/", full.names = TRUE, recursive = FALSE)
     
-    print(unzipped_contents)
-    
+
     #rename gdb
     new_path <- str_remove(download_path, '.zip')
     
@@ -144,8 +146,23 @@ uploaded_items <- map(full_items, function(item) {
       return(uploaded_item)
     }
     
+    #delete items in folder
+    delete_items <- dir_ls("C:/Users/mshapey/Documents/Test/", recurse = FALSE)
+    
+    walk(delete_items, function(path) {
+      if (dir_exists(path)) {
+        dir_delete(path)
+      } else if (file_exists(path)) {
+        file_delete(path)
+    
+      }
+    })
+    
+    
+    
     return(published_item)
     
+
     
   }
 })
